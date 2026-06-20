@@ -58,12 +58,24 @@ if __name__ == '__main__':
     ### computing landmarks
     landmark_descriptor = Landmarks(number_of_landmarks=int(params['landmark_parameters']['number_of_landmarks']))
 
-    for image in image_dataset:
+    landmarks_list = []
+    image_list = []
+    for index, image in enumerate(image_dataset):
         _, landmarks = landmark_descriptor.generate_landmarks(image=image,
                                                            channels=int(params['image_parameters']['image_channels']),
                                                            width=int(params['image_parameters']['image_width']),
                                                            height=int(params['image_parameters']['image_height']))
 
+        ### creating lists to store resized images and landmarks
+        image_list.append(Image.fromarray(image).resize((int(params['image_parameters']['image_width']),
+                                                            int(params['image_parameters']['image_height']))))
+        landmarks_list.append(landmarks)
         if str(params['plotting_parameters']['plot_image']) == 'true':
-            plot_image(Image.fromarray(image).resize((int(params['image_parameters']['image_width']),
-                                                            int(params['image_parameters']['image_height']))), landmarks)
+            plot_image(image_list[index], landmarks)
+
+        ### converting images to np.ndarray to create tensors
+        image_list[index] = np.array(image_list[index])
+
+    ### composing input tensors
+    input_images = np.array(image_list)
+    input_landmarks = np.array(landmarks_list)
