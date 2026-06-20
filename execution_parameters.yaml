@@ -1,0 +1,6 @@
+## application parameters
+image_parameters:
+  image_width: 256
+  image_height: 256
+  image_channels: 3
+  dataset_path: '/home/igor/PycharmProjects/morphing_dataset'

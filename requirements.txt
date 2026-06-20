@@ -5,3 +5,6 @@ einops
 numpy==1.24.4
 matplotlib
 keras<3
+pyyaml
+tensorflow-metadata==1.15.0
+iPython
