@@ -1,24 +1,19 @@
-import os
 import numpy as np
-import matplotlib.pyplot as plt
 from tqdm import tqdm
-import math
-from PIL import Image
 
 import tensorflow as tf
 from tensorflow import keras, einsum
 from tensorflow.keras import Model, Sequential
 from tensorflow.keras.layers import Layer
-import tensorflow.keras.layers as nn
 import tensorflow_addons as tfa
 import tensorflow_datasets as tfds
 
 from einops import rearrange
 from einops.layers.tensorflow import Rearrange
-from functools import partial
-from inspect import isfunction
 import yaml
 from image_utils.image_loader import ImageLoader
+from landmarks.landmark import Landmarks
+
 # Suppressing tf.hub warnings
 tf.get_logger().setLevel("ERROR")
 
@@ -36,11 +31,15 @@ if __name__ == '__main__':
         params = yaml.full_load(f)
 
     ### instantiating and loading the image dataset
-    image_loader = ImageLoader(width = int(params['image_parameters']['image_width']),
-                                height = int(params['image_parameters']['image_height']),
-                                channels = int(params['image_parameters']['image_channels']),
+    image_loader = ImageLoader(channels = int(params['image_parameters']['image_channels']),
                                 base_path = str(params['image_parameters']['dataset_path']))
 
     image_dataset = image_loader.load_images_from_path()
 
-    __import__("IPython").embed()
+    ### computing landmarks
+    landmark_descriptor = Landmarks(number_of_landmarks=int(params['landmark_parameters']['number_of_landmarks']))
+
+    image, landmarks = landmark_descriptor.generate_landmarks(image=image_dataset[0],
+                                                       channels=int(params['image_parameters']['image_channels']),
+                                                       width=int(params['image_parameters']['image_width']),
+                                                       height=int(params['image_parameters']['image_height']))

@@ -4,12 +4,9 @@ import numpy as np
 
 class ImageLoader:
 
-    def __init__(self, width: int, height: int, channels: 3, base_path: str):
-        self.width = width
-        self.height = height
+    def __init__(self, channels: int, base_path: str):
         self.channels = channels
         self.folder = Path(base_path)
-
 
     def load_images_from_path(self):
 
@@ -29,9 +26,6 @@ class ImageLoader:
                         image = image.convert("RGB")
                     elif self.channels == 1:
                         image = image.convert("L")
-
-                    ### resizing
-                    image = image.resize((self.width, self.height), Image.Resampling.LANCZOS)
 
                     ## converting to numpy array
                     image_dataset.append(np.array(image))
