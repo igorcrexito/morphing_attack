@@ -8,3 +8,5 @@ keras<3
 pyyaml
 tensorflow-metadata==1.15.0
 iPython
+opencv-python
+dlib
