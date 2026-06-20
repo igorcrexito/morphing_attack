@@ -1,0 +1,7 @@
+tensorflow
+tensorflow_datasets
+tensorflow_addons
+einops
+numpy==1.24.4
+matplotlib
+keras<3
