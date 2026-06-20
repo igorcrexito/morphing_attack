@@ -76,11 +76,10 @@ if __name__ == '__main__':
         ### converting images to np.ndarray to create tensors
         image_list[index] = np.array(image_list[index])
 
-    ### composing input tensors
+
+    ### composing input tensors ---> adjust for more landmarks
     input_images = np.array(image_list)
-    input_landmarks = landmark_descriptor.generate_heatmaps(landmarks=np.array(landmarks_list),
+    input_landmarks = landmark_descriptor.generate_heatmaps(landmarks=np.array(landmarks_list[0]),
                                                             width=int(params['image_parameters']['image_width']),
                                                             height=int(params['image_parameters']['image_height']),
                                                             sigma=3)
-
-    __import__("IPython").embed()
