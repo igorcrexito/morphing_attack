@@ -53,3 +53,22 @@ class Landmarks:
         landmarks = np.round(landmarks).astype(np.int32)
 
         return image, landmarks
+
+
+    def generate_heatmaps(self, landmarks: np.ndarray, width: int, height: int, sigma: int = 3):
+
+        num_landmarks = landmarks.shape[0]
+
+        heatmaps = np.zeros((height, width, num_landmarks), dtype=np.float32)
+
+        yy, xx = np.meshgrid(
+            np.arange(height),
+            np.arange(width),
+            indexing="ij")
+
+        for i, (x, y) in enumerate(landmarks):
+            heatmaps[:, :, i] = np.exp(
+                -((xx - x) ** 2 + (yy - y) ** 2
+                ) / (2 * sigma ** 2))
+
+        return heatmaps
