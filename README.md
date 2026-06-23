@@ -1,1 +1,1 @@
-This is the repository for the morphing attack strategy named "XXXXX".
+This is the repository for the morphing attack strategy named "XXXXX"

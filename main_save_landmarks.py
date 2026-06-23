@@ -14,6 +14,10 @@ from image_utils.image_loader import ImageLoader
 from landmarks.landmark import Landmarks
 from PIL import ImageDraw
 from PIL import Image
+import os
+
+output_dir = "output_dataset"
+os.makedirs(output_dir, exist_ok=True)
 
 
 # Suppressing tf.hub warnings
@@ -66,20 +70,37 @@ if __name__ == '__main__':
                                                            width=int(params['image_parameters']['image_width']),
                                                            height=int(params['image_parameters']['image_height']))
 
-        ### creating lists to store resized images and landmarks
-        image_list.append(Image.fromarray(image).resize((int(params['image_parameters']['image_width']),
-                                                            int(params['image_parameters']['image_height']))))
-        landmarks_list.append(landmarks)
+        ### resizing image to be in accordance with model input
+        resized_image = Image.fromarray(image).resize((int(params['image_parameters']['image_width']),
+                                                       int(params['image_parameters']['image_height'])))
+
+        ### storing resized image
+        image_filename = os.path.join(output_dir, f"image_{index + 1}.jpg")
+        resized_image.save(image_filename, format="JPEG")
+
+        ### storing landmarks
+        landmark_filename = os.path.join(output_dir, f"image_{index + 1}.csv")
+        np.savetxt(landmark_filename,
+                   landmarks,
+                   delimiter=",",
+                   header="x,y",
+                   comments="",
+                   fmt="%.4f")
+
+
+        ### showing landmarks
         if str(params['plotting_parameters']['plot_image']) == 'true':
-            plot_image(image_list[index], landmarks)
+            image = np.array(Image.open(f"{output_dir}/image_{index + 1}.jpg"))
 
-        ### converting images to np.ndarray to create tensors
-        image_list[index] = np.array(image_list[index])
+            landmarks = np.loadtxt(f"{output_dir}/image_{index + 1}.csv", delimiter=",", skiprows=1)
 
+            plt.figure(figsize=(6, 6))
+            plt.imshow(image)
 
-    ### composing input tensors ---> adjust for more landmarks
-    input_images = np.array(image_list)
-    input_landmarks = landmark_descriptor.generate_heatmaps(landmarks=np.array(landmarks_list[0]),
-                                                            width=int(params['image_parameters']['image_width']),
-                                                            height=int(params['image_parameters']['image_height']),
-                                                            sigma=3)
+            plt.scatter(landmarks[:, 0], landmarks[:, 1], color="red", s=20)
+
+            plt.xlim(0, 224)
+            plt.ylim(224, 0)
+
+            plt.axis("off")
+            plt.show()
