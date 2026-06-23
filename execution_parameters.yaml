@@ -10,3 +10,6 @@ landmark_parameters:
 
 plotting_parameters:
   plot_image: 'false'
+
+morphing_parameters:
+  alpha: 0.5

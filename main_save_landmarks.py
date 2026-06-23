@@ -29,24 +29,6 @@ config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
 session = tf.compat.v1.Session(config=config)
 
 
-
-def plot_image(image, landmarks):
-    image_draw = image.copy()
-    draw = ImageDraw.Draw(image_draw)
-
-    for x, y in landmarks:
-        r = 2
-        draw.ellipse(
-            (x - r, y - r, x + r, y + r),
-            fill='red'
-        )
-
-    plt.imshow(image_draw)
-    plt.axis('off')
-    plt.show()
-
-
-
 if __name__ == '__main__':
 
     print("Reading the configuration yaml the stores the executation variables")
