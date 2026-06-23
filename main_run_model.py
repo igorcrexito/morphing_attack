@@ -13,6 +13,7 @@ from landmarks.landmark import Landmarks
 from PIL import Image
 import os
 from model.diffusion_model import DiffusionModel
+import matplotlib.pyplot as plt
 
 
 # Suppressing tf.hub warnings
@@ -26,6 +27,37 @@ session = tf.compat.v1.Session(config=config)
 output_dir = "output_dataset"
 extension = '.jpg'
 
+
+def load_training_pairs(output_dir, landmark_descriptor, width, height):
+
+    files = sorted([f for f in os.listdir(output_dir) if f.endswith(".jpg")])
+
+    imageA_list = []
+    imageB_list = []
+
+    heatmapA_list = []
+    heatmapB_list = []
+
+    for i in range(len(files)-1):
+        imgA = np.array(Image.open(os.path.join(output_dir, files[i]))).astype(np.float32) / 255.0
+        imgB = np.array(Image.open(os.path.join(output_dir, files[i+1]))).astype(np.float32) / 255.0
+
+        lmA = np.loadtxt(os.path.join(output_dir, files[i].replace(".jpg",".csv")), delimiter=",", skiprows=1)
+        lmB = np.loadtxt(os.path.join(output_dir, files[i+1].replace(".jpg",".csv")), delimiter=",", skiprows=1)
+
+        hmA = landmark_descriptor.generate_heatmaps(lmA, width, height)
+        hmB = landmark_descriptor.generate_heatmaps(lmB, width, height)
+
+        imageA_list.append(imgA)
+        imageB_list.append(imgB)
+
+        heatmapA_list.append(hmA)
+        heatmapB_list.append(hmB)
+
+    return (np.array(imageA_list), np.array(imageB_list), np.array(heatmapA_list), np.array(heatmapB_list))
+
+
+
 if __name__ == '__main__':
     print("Reading the configuration yaml the stores the executation variables")
     with open("execution_parameters.yaml", "r") as f:
@@ -34,44 +66,23 @@ if __name__ == '__main__':
     ### retrieving alpha coefficient. It represents the proportion of each face to be considered
     alpha = float(params['morphing_parameters']['alpha'])
 
-    ### List all store images
-    files = [f for f in os.listdir(output_dir) if f.endswith(extension)]
+    ### instantiating landmark descriptor
+    landmark_descriptor = Landmarks(number_of_landmarks=68)
 
-    ### randomizing two elements of the input list
-    index_A, index_B = np.random.choice(files, size=2, replace=False)
+    ### reading dataset information
+    imageA, imageB, heatmapA, heatmapB = load_training_pairs(output_dir=output_dir,
+                                                             landmark_descriptor=landmark_descriptor,
+                                                             width=int(params['image_parameters']['image_width']),
+                                                             height=int(params['image_parameters']['image_height']))
 
-    ### loading images A and B and landmarks
-    image_A = np.array(Image.open(f"{output_dir}/{index_A}"))
-    image_B = np.array(Image.open(f"{output_dir}/{index_B}"))
+    ### instantiating the diffusion model
+    model = DiffusionModel()
 
-    ### generating landmarks heatmaps
-    landmark_descriptor = Landmarks(number_of_landmarks=int(params['landmark_parameters']['number_of_landmarks']))
-    landmarks_A = landmark_descriptor.generate_heatmaps(np.loadtxt(f"{output_dir}/{index_A.split('.')[0]}.csv", delimiter=",", skiprows=1),
-                                                        int(params['image_parameters']['image_width']),
-                                                        int(params['image_parameters']['image_height']))
+    ### fitting the model
+    model.fit(imageA, imageB, heatmapA, heatmapB, alpha=alpha, epochs=50, batch_size=1)
 
-    landmarks_B = landmark_descriptor.generate_heatmaps(np.loadtxt(f"{output_dir}/{index_B.split('.')[0]}.csv", delimiter=",", skiprows=1),
-                                                        int(params['image_parameters']['image_width']),
-                                                        int(params['image_parameters']['image_height']))
-
-    ### generating an input tensor
-    image_A = image_A.astype(np.float32) / 255.0
-    image_B = image_B.astype(np.float32) / 255.0
-    input_tensor = tf.concat([image_A, image_B, landmarks_A, landmarks_B], axis=-1)
-
-    ### instantiating a morphing model
-    diffusion_model = DiffusionModel()
-
-    ### creating a target landmark and collapsing into a single channel
-    maskA = tf.reduce_max(landmarks_A, axis=-1, keepdims=True)
-    maskB = tf.reduce_max(landmarks_B, axis=-1, keepdims=True)
-
-    ### generating a weak supervised signal for the morphing image
-    predicted_morph = diffusion_model(input_tensor, training=True)
-
-    ### defining a customized mse loss
-    lossA = tf.reduce_mean(maskA * tf.square(morph - image_A))
-    lossB = tf.reduce_mean(maskB * tf.square(morph - image_B))
-    balanced_loss = (alpha * lossA + (1 - alpha) * lossB)
-
+    ### predicting
+    predicted_morph = model.predict(imageA, imageB, heatmapA, heatmapB)
+    plt.imshow(np.uint8(predicted_morph[0]*255.0))
+    plt.show()
     __import__("IPython").embed()

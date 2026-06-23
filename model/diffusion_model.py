@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (Input, Conv2D, BatchNormalization, Activation, MaxPooling2D, UpSampling2D, Concatenate)
-
+import numpy as np
 
 class DiffusionModel:
 
@@ -53,6 +53,51 @@ class DiffusionModel:
     def _landmark_region_loss(self, morph, target_face, mask):
         return tf.reduce_mean(mask * tf.square(morph - target_face))
 
-    def fit(self, image_A, image_B, heatmap_A, heatmap_B):
+    @tf.function
+    def train_step(self, image_A, image_B, heatmap_A, heatmap_B, alpha, optimizer):
         X = tf.concat([image_A, image_B, heatmap_A, heatmap_B], axis=-1)
-        morph = self.model(X, training=True)
+
+        with tf.GradientTape() as tape:
+            morph = self.model(X, training=True)
+
+            loss = self._balanced_loss(morph, image_A, image_B, heatmap_A, heatmap_B, alpha)
+
+        grads = tape.gradient(loss, self.model.trainable_variables)
+        optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+
+        return loss
+
+
+    def _balanced_loss(self, morph, image_A, image_B, heatmap_A, heatmap_B, alpha):
+        maskA = tf.reduce_max(heatmap_A, axis=-1, keepdims=True)
+        maskB = tf.reduce_max(heatmap_B, axis=-1, keepdims=True)
+
+        lossA = tf.reduce_mean(maskA * tf.square(morph - image_A))
+        lossB = tf.reduce_mean(maskB * tf.square(morph - image_B))
+
+        return (alpha * lossA + (1 - alpha) * lossB)
+
+
+    def fit(self, image_A, image_B, heatmap_A, heatmap_B, alpha, epochs, batch_size):
+        dataset = tf.data.Dataset.from_tensor_slices((image_A, image_B, heatmap_A, heatmap_B))
+        dataset = dataset.shuffle(len(image_A))
+
+        dataset = dataset.batch(batch_size)
+
+        optimizer = tf.keras.optimizers.Adam(1e-4)
+
+        for epoch in range(epochs):
+            epoch_loss = []
+
+            for imgA, imgB, hmA, hmB in dataset:
+                loss = self.train_step(imgA, imgB, hmA, hmB, alpha, optimizer)
+
+                epoch_loss.append(loss.numpy())
+
+            print(f"Epoch {epoch + 1}: "f"{np.mean(epoch_loss):.4f}")
+
+    def predict(self, image_A, image_B, heatmap_A, heatmap_B):
+        X = tf.concat([image_A, image_B, heatmap_A, heatmap_B], axis=-1)
+        morph = self.model(X, training=False)
+
+        return morph
