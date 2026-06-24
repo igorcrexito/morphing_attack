@@ -13,17 +13,17 @@ class DiffusionModel:
 
         inputs = Input(shape=(224, 224, 142))
 
-        s1, p1 = self._encoder_block(inputs, 64)
-        s2, p2 = self._encoder_block(p1, 128)
-        s3, p3 = self._encoder_block(p2, 256)
-        s4, p4 = self._encoder_block(p3, 512)
+        s1, p1 = self._encoder_block(inputs, 32)
+        s2, p2 = self._encoder_block(p1, 64)
+        s3, p3 = self._encoder_block(p2, 128)
+        #s4, p4 = self._encoder_block(p3, 256)
 
-        b = self._conv_block(p4, 1024)
+        b = self._conv_block(p3, 256)
 
-        d1 = self._decoder_block(b, s4, 512)
-        d2 = self._decoder_block(d1, s3, 256)
-        d3 = self._decoder_block(d2, s2, 128)
-        d4 = self._decoder_block(d3, s1, 64)
+        #d1 = self._decoder_block(b, s4, 256)
+        d2 = self._decoder_block(b, s3, 128)
+        d3 = self._decoder_block(d2, s2, 64)
+        d4 = self._decoder_block(d3, s1, 32)
 
         output = Conv2D(3, 1, activation="sigmoid")(d4)
 

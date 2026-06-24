@@ -16,7 +16,7 @@ from PIL import ImageDraw
 from PIL import Image
 import os
 
-output_dir = "output_dataset"
+output_dir = "output_dataset/1000"
 os.makedirs(output_dir, exist_ok=True)
 
 
@@ -44,45 +44,50 @@ if __name__ == '__main__':
     ### computing landmarks
     landmark_descriptor = Landmarks(number_of_landmarks=int(params['landmark_parameters']['number_of_landmarks']))
 
+
     landmarks_list = []
     image_list = []
     for index, image in enumerate(image_dataset):
-        _, landmarks = landmark_descriptor.generate_landmarks(image=image,
-                                                           channels=int(params['image_parameters']['image_channels']),
-                                                           width=int(params['image_parameters']['image_width']),
-                                                           height=int(params['image_parameters']['image_height']))
 
-        ### resizing image to be in accordance with model input
-        resized_image = Image.fromarray(image).resize((int(params['image_parameters']['image_width']),
-                                                       int(params['image_parameters']['image_height'])))
+        try:
+            _, landmarks = landmark_descriptor.generate_landmarks(image=image,
+                                                               channels=int(params['image_parameters']['image_channels']),
+                                                               width=int(params['image_parameters']['image_width']),
+                                                               height=int(params['image_parameters']['image_height']))
 
-        ### storing resized image
-        image_filename = os.path.join(output_dir, f"image_{index + 1}.jpg")
-        resized_image.save(image_filename, format="JPEG")
+            ### resizing image to be in accordance with model input
+            resized_image = Image.fromarray(image).resize((int(params['image_parameters']['image_width']),
+                                                           int(params['image_parameters']['image_height'])))
 
-        ### storing landmarks
-        landmark_filename = os.path.join(output_dir, f"image_{index + 1}.csv")
-        np.savetxt(landmark_filename,
-                   landmarks,
-                   delimiter=",",
-                   header="x,y",
-                   comments="",
-                   fmt="%.4f")
+            ### storing resized image
+            image_filename = os.path.join(output_dir, f"image_{index + 1}.jpg")
+            resized_image.save(image_filename, format="JPEG")
+
+            ### storing landmarks
+            landmark_filename = os.path.join(output_dir, f"image_{index + 1}.csv")
+            np.savetxt(landmark_filename,
+                       landmarks,
+                       delimiter=",",
+                       header="x,y",
+                       comments="",
+                       fmt="%.4f")
 
 
-        ### showing landmarks
-        if str(params['plotting_parameters']['plot_image']) == 'true':
-            image = np.array(Image.open(f"{output_dir}/image_{index + 1}.jpg"))
+            ### showing landmarks
+            if str(params['plotting_parameters']['plot_image']) == 'true':
+                image = np.array(Image.open(f"{output_dir}/image_{index + 1}.jpg"))
 
-            landmarks = np.loadtxt(f"{output_dir}/image_{index + 1}.csv", delimiter=",", skiprows=1)
+                landmarks = np.loadtxt(f"{output_dir}/image_{index + 1}.csv", delimiter=",", skiprows=1)
 
-            plt.figure(figsize=(6, 6))
-            plt.imshow(image)
+                plt.figure(figsize=(6, 6))
+                plt.imshow(image)
 
-            plt.scatter(landmarks[:, 0], landmarks[:, 1], color="red", s=20)
+                plt.scatter(landmarks[:, 0], landmarks[:, 1], color="red", s=20)
 
-            plt.xlim(0, 224)
-            plt.ylim(224, 0)
+                plt.xlim(0, 224)
+                plt.ylim(224, 0)
 
-            plt.axis("off")
-            plt.show()
+                plt.axis("off")
+                plt.show()
+        except:
+            print(f'no face detected for index {index}')

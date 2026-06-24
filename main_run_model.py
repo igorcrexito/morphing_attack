@@ -24,7 +24,7 @@ gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8)
 config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
 session = tf.compat.v1.Session(config=config)
 
-output_dir = "output_dataset"
+output_dir = "output_dataset/1000"
 extension = '.jpg'
 
 
@@ -79,10 +79,10 @@ if __name__ == '__main__':
     model = DiffusionModel()
 
     ### fitting the model
-    model.fit(imageA, imageB, heatmapA, heatmapB, alpha=alpha, epochs=50, batch_size=1)
+    epochs = int(params['model_parameters']['epochs'])
+    model.fit(imageA, imageB, heatmapA, heatmapB, alpha=alpha, epochs=epochs, batch_size=16)
 
     ### predicting
     predicted_morph = model.predict(imageA, imageB, heatmapA, heatmapB)
     plt.imshow(np.uint8(predicted_morph[0]*255.0))
     plt.show()
-    __import__("IPython").embed()
