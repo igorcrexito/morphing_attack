@@ -15,4 +15,4 @@ morphing_parameters:
   alpha: 0.5
 
 model_parameters:
-  epochs: 10
+  epochs: 20

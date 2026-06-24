@@ -63,7 +63,7 @@ class DiffusionModel:
         with tf.GradientTape() as tape:
             #morph = self.model(X, training=True)
             delta = self.model(X, training=True)
-            morph = self._build_morph(image_A, delta, heatmap_B)
+            morph = self._build_morph(image_A, delta, heatmap_B, alpha)
 
             loss = self._balanced_loss(morph, image_A, image_B, heatmap_A, heatmap_B, alpha)
 
@@ -72,12 +72,12 @@ class DiffusionModel:
 
         return loss
 
-    def _build_morph(self, image_A, delta, heatmap_B):
+    def _build_morph(self, image_A, delta, heatmap_B, alpha):
         maskB = tf.reduce_max(heatmap_B, axis=-1, keepdims=True)
         maskB = tf.nn.avg_pool2d(maskB, ksize=11, strides=1, padding="SAME")
 
         maskB = tf.clip_by_value(maskB, 0.0, 1.0)
-        morph = image_A + (0.20 * delta * maskB)
+        morph = image_A + (alpha * delta * maskB)
 
         morph = tf.clip_by_value(morph, 0.0, 1.0)
         return morph
@@ -104,7 +104,7 @@ class DiffusionModel:
         loss_shape = self._shape_loss(morph, image_A)
         loss_color = self._color_loss(morph,image_A)
 
-        loss = (5.0 * loss_recon_A + 10.0 * loss_background + 3.0 * loss_landmark + 2.0 * loss_shape + 2.0 * loss_color)
+        loss = (5.0 * loss_recon_A + 3.0 * loss_background + 20.0 * loss_landmark + 3.0 * loss_shape + 2.0 * loss_color)
 
         return loss
 
