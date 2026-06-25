@@ -10,3 +10,4 @@ tensorflow-metadata==1.15.0
 iPython
 opencv-python
 dlib
+keras-facenet

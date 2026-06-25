@@ -3,12 +3,15 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (Input, Conv2D, BatchNormalization, Activation, MaxPooling2D, UpSampling2D, Concatenate)
 import numpy as np
 from tensorflow.keras.layers import Lambda
+from model.arcface_backbone import ArcFaceBackbone
 
 class DiffusionModel:
 
     def __init__(self):
         self.model = self.build_morph_generator()
-
+        facebackbone = self.arcface = tf.keras.applications.ResNet50(include_top=False, pooling="avg", weights="imagenet")
+        facebackbone.trainable = False
+        self.arcface = facebackbone
 
     def build_morph_generator(self):
 
@@ -61,11 +64,10 @@ class DiffusionModel:
         X = tf.concat([image_A, image_B, heatmap_A, heatmap_B], axis=-1)
 
         with tf.GradientTape() as tape:
-            #morph = self.model(X, training=True)
             delta = self.model(X, training=True)
             morph = self._build_morph(image_A, delta, heatmap_B, alpha)
 
-            loss = self._balanced_loss(morph, image_A, image_B, heatmap_A, heatmap_B, alpha)
+            loss = self._balanced_loss(morph, image_A, image_B, heatmap_B, alpha)
 
         grads = tape.gradient(loss, self.model.trainable_variables)
         optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
@@ -83,7 +85,7 @@ class DiffusionModel:
         return morph
 
 
-    def _balanced_loss(self, morph, image_A, image_B, heatmap_A, heatmap_B, alpha):
+    def _balanced_loss(self, morph, image_A, image_B, heatmap_B, alpha):
 
         maskB = tf.reduce_max(heatmap_B, axis=-1, keepdims=True)
         maskB = tf.nn.avg_pool2d(maskB, ksize=11, strides=1, padding="SAME")
@@ -99,12 +101,19 @@ class DiffusionModel:
         # preserve outside landmarks
         loss_background = tf.reduce_mean(background_mask * tf.square(morph - image_A))
 
+        ## computing loss landmark
+        loss_landmark_A = tf.reduce_mean(maskB * tf.square(morph - image_A))
+        loss_landmark_B = tf.reduce_mean(maskB * tf.square(morph - image_B))
+        loss_landmark = (alpha * loss_landmark_A + (1.0 - alpha) * loss_landmark_B)
+
         # inject B only on landmarks
-        loss_landmark = tf.reduce_mean(maskB * tf.square(morph - target_landmark))
         loss_shape = self._shape_loss(morph, image_A)
         loss_color = self._color_loss(morph,image_A)
+        loss_arcface = self._arcface_identity_loss(morph, image_A, image_B, heatmap_B, alpha)
 
-        loss = (5.0 * loss_recon_A + 3.0 * loss_background + 20.0 * loss_landmark + 3.0 * loss_shape + 2.0 * loss_color)
+        loss = (0.5 * loss_recon_A + 0.5 * loss_background +
+                20.0 * loss_landmark + 0.5 * loss_shape +
+                0.5 * loss_color + 20.0 * loss_arcface)
 
         return loss
 
@@ -128,13 +137,13 @@ class DiffusionModel:
             print(f"Epoch {epoch + 1}: "f"{np.mean(epoch_loss):.4f}")
 
 
-    def predict(self, image_A, image_B, heatmap_A, heatmap_B):
+    def predict(self, image_A, image_B, heatmap_A, heatmap_B, alpha):
 
         X = tf.concat([image_A, image_B, heatmap_A, heatmap_B], axis=-1)
         delta = self.model(X, training=False)
-        morph = self._build_morph(image_A, delta, heatmap_B)
+        morph = self._build_morph(image_A, delta, heatmap_B, alpha=alpha)
 
-        return morph
+        return morph, delta
 
     def _shape_loss(self, morph, image_A):
         gx_m = morph[:, :, 1:, :] - morph[:, :, :-1, :]
@@ -151,3 +160,33 @@ class DiffusionModel:
         mean_A = tf.reduce_mean(image_A, axis=[1, 2], keepdims=True)
 
         return tf.reduce_mean(tf.square(mean_morph - mean_A))
+
+
+    def _masked_face(self,image, heatmap):
+
+        mask = tf.reduce_max(heatmap, axis=-1, keepdims=True)
+        mask = tf.nn.avg_pool2d(mask, 21, 1, "SAME")
+
+        mask = tf.clip_by_value(mask, 0.0, 1.0)
+        return image * mask
+
+    def _arcface_identity_loss(self, morph, image_A, image_B, heatmap_B, alpha):
+        morph_masked = self._masked_face(morph, heatmap_B)
+
+        A_masked = self._masked_face(image_A, heatmap_B)
+        B_masked = self._masked_face(image_B, heatmap_B)
+
+        emb_M = self.arcface(morph_masked)
+        emb_A = self.arcface(A_masked)
+        emb_B = self.arcface(B_masked)
+
+        emb_M = tf.math.l2_normalize(emb_M, axis=-1)
+        emb_A = tf.math.l2_normalize(emb_A, axis=-1)
+        emb_B = tf.math.l2_normalize(emb_B, axis=-1)
+
+        target = alpha * emb_A + (1 - alpha) * emb_B
+        target = tf.math.l2_normalize(target, axis=-1)
+
+        sim = tf.reduce_sum(emb_M * target, axis=-1)
+
+        return tf.reduce_mean(1.0 - sim)

@@ -84,6 +84,6 @@ if __name__ == '__main__':
     model.fit(imageA, imageB, heatmapA, heatmapB, alpha=alpha, epochs=epochs, batch_size=16)
 
     ### predicting
-    predicted_morph = model.predict(imageA, imageB, heatmapA, heatmapB)
-    plt.imshow(np.uint8(predicted_morph[0]*255.0))
+    predicted_morph, delta = model.predict(imageA, imageB, heatmapA, heatmapB, alpha)
+    plt.imshow(np.uint8(predicted_morph[1]*255.0))
     plt.show()
