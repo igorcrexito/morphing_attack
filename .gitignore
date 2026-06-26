@@ -1,0 +1,18 @@
+# Large generated data / model artifacts
+cache/
+
+# Python virtual environment
+morphing_env/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# GFPGAN auto-downloaded weights (fetched on first run)
+gfpgan/weights/
+
+# PyCharm project settings
+.idea/
+
+# Generated morph outputs
+output_dataset/

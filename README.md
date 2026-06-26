@@ -171,7 +171,6 @@ identities.
 | `morphing/`              | warping (`warp.py`), pairing, dataset/caching |
 | `model/`                 | U-Net refiner + PatchGAN, ArcFace/FaceNet embedders |
 | `image_utils/`           | image loading, GFPGAN face restoration |
-| `descriptors/`           | texture descriptors (BSIF, ELBP, reflectance, noise) |
 | `execution_parameters.yaml` | all run configuration |
 
 ## Configuration (`execution_parameters.yaml`)
@@ -181,14 +180,44 @@ Key knobs: `image_width/height` (model resolution, divisible by 8),
 `morph_epochs` / `batch_size`, and the dataset parameters (`output_dir`,
 `cache_dir`, `val_split`, `max_pairs`, `seed`).
 
-## Quick start
+## Quick start (full pipeline)
 
 ```bash
 pip install -r requirements.txt
-# (optional, for the realism pass) pip install gfpgan basicsr facexlib
 
 python main_save_landmarks.py          # 1. landmarks
 python main_prepare_pairs.py           # 2. pair + warp + cache
 python main_train_model.py             # 3. train refiner
 python main_inference.py A.jpg B.jpg   # 4. morph two faces
 ```
+
+## Inference only
+
+If you just want to morph two faces with the already-trained model
+(`cache/morph_model.weights.h5`), you don't need the training dependencies — use
+the slimmer `requirements_inference.txt`, which also includes the GFPGAN
+restoration pass.
+
+```bash
+# 1. create / activate the environment
+python -m venv .venv
+source .venv/bin/activate              # Windows: .venv\Scripts\activate
+
+# 2. install the inference dependencies
+pip install -r requirements_inference.txt
+
+# 3. run the morph, passing the two input image paths
+python main_inference.py path/to/A.jpg path/to/B.jpg
+```
+
+Notes:
+
+- **Image paths** are positional: the first argument is identity A, the second is
+  identity B. If you omit them, it falls back to the defaults in
+  `main_inference.py` (`output_dataset/1000/image_1.jpg` and `image_8.jpg`).
+- The blend ratio, model resolution, and `cache_dir` are read from
+  `execution_parameters.yaml` (`alpha`, `image_width/height`, `cache_dir`).
+- On the **first** run GFPGAN downloads its model weights automatically to
+  `gfpgan/weights/`.
+- GFPGAN is a *soft dependency*. If it isn't installed, `restore_face` returns the
+  un-restored image and the pipeline still runs end-to-end.

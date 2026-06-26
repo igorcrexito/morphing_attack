@@ -1,3 +1,7 @@
+# Single environment for the whole project: the training pipeline
+# (main_save_landmarks.py, main_prepare_pairs.py, main_train_model.py) and
+# inference (main_inference.py), including the GFPGAN face-restoration pass.
+
 tensorflow[and-cuda]==2.15.1
 tensorflow_datasets
 tensorflow_addons==0.23.0
@@ -7,6 +11,7 @@ einops
 matplotlib
 pyyaml
 iPython
+Pillow
 opencv-python
 dlib
 keras-facenet
@@ -14,7 +19,20 @@ scipy
 scikit-image
 pandas
 scikit-learn
-# optional: final face-restoration pass in main_inference.py (pulls in PyTorch)
-# gfpgan
-# basicsr
-# facexlib
+tqdm
+
+# final face-restoration pass in main_inference.py (pulls in PyTorch)
+# NOTE: basicsr 1.4.2 imports torchvision.transforms.functional_tensor, removed in
+# torchvision >=0.17. image_utils/face_restore.py installs a runtime shim for this,
+# so no manual package patching is required.
+#
+# PyTorch is pinned to the CPU build. gfpgan/basicsr/facexlib otherwise pull the
+# default GPU wheel from PyPI, whose bundled CUDA/NCCL conflicted with this machine
+# (libtorch_cuda.so: undefined symbol ncclCommResume) and silently disabled GFPGAN.
+# GFPGAN runs fine on CPU for single morph images, so we pin the +cpu wheels here.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.12.1+cpu
+torchvision==0.27.1+cpu
+gfpgan
+basicsr
+facexlib
