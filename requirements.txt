@@ -1,13 +1,20 @@
-tensorflow
+tensorflow[and-cuda]==2.15.1
 tensorflow_datasets
-tensorflow_addons
-einops
-numpy==1.24.4
-matplotlib
-keras<3
-pyyaml
+tensorflow_addons==0.23.0
 tensorflow-metadata==1.15.0
+numpy==1.24.4
+einops
+matplotlib
+pyyaml
 iPython
 opencv-python
 dlib
 keras-facenet
+scipy
+scikit-image
+pandas
+scikit-learn
+# optional: final face-restoration pass in main_inference.py (pulls in PyTorch)
+# gfpgan
+# basicsr
+# facexlib
