@@ -80,6 +80,18 @@ def warp_to_shape(img, src_landmarks, dst_landmarks, triangles, width, height):
     return out
 
 
+def warp_to_landmarks(img, src_lm, dst_lm, width, height):
+    """Warp a full-frame image from `src_lm` geometry onto `dst_lm` geometry.
+
+    Convenience wrapper that adds the border anchors and builds the triangulation,
+    e.g. to move a morph aligned to the mean shape into one identity's posture.
+    """
+    p_src = add_boundary_points(src_lm[:68], width, height)
+    p_dst = add_boundary_points(dst_lm[:68], width, height)
+    triangles = calculate_delaunay_triangles(width, height, p_dst)
+    return warp_to_shape(img, p_src, p_dst, triangles, width, height)
+
+
 def hull_mask(landmarks_68, width, height, feather=11):
     """Feathered convex-hull mask of the face (1 inside the face, ~0 outside).
 
@@ -150,58 +162,51 @@ def poisson_seam_blend(morph, background, landmarks_68, width, height):
     return blended.astype(np.float32) / 255.0
 
 
-# 68-landmark (ibug/dlib) left<->right correspondences. Points not listed lie on
-# the facial midline (chin, nose bridge, nose tip, mouth centre) and are their own
-# mirror.
-_SYMMETRY_PAIRS = [
-    (0, 16), (1, 15), (2, 14), (3, 13), (4, 12), (5, 11), (6, 10), (7, 9),  # jaw
-    (17, 26), (18, 25), (19, 24), (20, 23), (21, 22),                       # brows
-    (31, 35), (32, 34),                                                     # nose base
-    (36, 45), (37, 44), (38, 43), (39, 42), (40, 47), (41, 46),             # eyes
-    (48, 54), (49, 53), (50, 52), (59, 55), (58, 56),                       # outer mouth
-    (60, 64), (61, 63), (67, 65),                                           # inner mouth
-]
+def shape_distance(lm_a: np.ndarray, lm_b: np.ndarray) -> float:
+    """Procrustes-style face-shape score between two 68x2 landmark shapes.
 
-
-def symmetrize_landmarks(landmarks_68: np.ndarray) -> np.ndarray:
-    """Return an upright, left-right symmetric ("frontal") version of a shape.
-
-    Mirroring the 68 landmarks about the face's own vertical midline and averaging
-    each point with its mirrored partner removes left/right asymmetry (yaw) and head
-    tilt (roll) at once: the only shape invariant under a vertical-axis reflection is
-    a front-facing, upright one. Identity-bearing proportions (face length/width,
-    feature spacing) are preserved.
+    Each shape is centered and scale-normalized (removing position and face size),
+    then we take the mean per-point Euclidean distance. Large values mean the two
+    faces differ a lot in posture/shape - the case where morphing to a common mean
+    shape deforms. Callers use it to decide whether a pair is blendable.
     """
-    lm = landmarks_68[:68].astype(np.float32)
-    cx = lm[:, 0].mean()
-
-    mirror = lm.copy()
-    mirror[:, 0] = 2.0 * cx - lm[:, 0]      # reflect across the vertical midline
-
-    # reorder so a point lands on top of the partner it should be symmetric with
-    reordered = mirror.copy()
-    for l, r in _SYMMETRY_PAIRS:
-        reordered[l], reordered[r] = mirror[r], mirror[l]
-
-    return (lm + reordered) * 0.5
+    def _normalize(p):
+        p = p[:68].astype(np.float32)
+        p = p - p.mean(axis=0)
+        scale = np.sqrt((p ** 2).sum() / len(p))
+        return p / (scale + 1e-8)
+    a, b = _normalize(lm_a), _normalize(lm_b)
+    return float(np.linalg.norm(a - b, axis=1).mean())
 
 
-def frontalize(img, landmarks_68, width, height):
-    """Warp a face to a front-facing, upright pose via its symmetrized landmarks.
+# Jaw landmarks (ibug/dlib 0-16) trace the outer face contour. Max pixels (at
+# model resolution) the blended contour may sit from BOTH source jawlines before
+# we snap it back toward the nearer real contour - prevents an unnatural "average"
+# jaw that matches neither face. Set to None to disable clamping.
+JAW_INDICES = list(range(17))
+CONTOUR_MAX_SHIFT = 10.0
 
-    Returns (frontal_img, frontal_landmarks). This corrects in-plane tilt and mild
-    out-of-plane yaw using only the existing piecewise-affine warp; it cannot
-    recover detail occluded in a strong profile, which will smear.
+
+def clamp_contour(mean_lm, lm_a, lm_b, max_shift=CONTOUR_MAX_SHIFT):
+    """Pull blended jaw points back when they stray too far from both faces.
+
+    A blended contour point lies between A's and B's jaw. If it ends up farther
+    than `max_shift` px from *both* source jawlines (which happens when the two
+    jaws are far apart), snap it to within `max_shift` of whichever real contour
+    is nearer, so the morph's outline stays a plausible face shape.
     """
-    lm = landmarks_68[:68].astype(np.float32)
-    target = symmetrize_landmarks(lm)
-
-    p_src = add_boundary_points(lm, width, height)
-    p_dst = add_boundary_points(target, width, height)
-    triangles = calculate_delaunay_triangles(width, height, p_dst)
-
-    out = warp_to_shape(img, p_src, p_dst, triangles, width, height)
-    return out, target
+    if max_shift is None:
+        return mean_lm
+    out = mean_lm.astype(np.float32).copy()
+    for i in JAW_INDICES:
+        da, db = out[i] - lm_a[i], out[i] - lm_b[i]
+        na, nb = np.linalg.norm(da), np.linalg.norm(db)
+        if min(na, nb) > max_shift:
+            if na <= nb:
+                out[i] = lm_a[i] + da / (na + 1e-8) * max_shift
+            else:
+                out[i] = lm_b[i] + db / (nb + 1e-8) * max_shift
+    return out
 
 
 def morph_pair(img_a, img_b, lm_a, lm_b, alpha, width, height):
@@ -216,6 +221,10 @@ def morph_pair(img_a, img_b, lm_a, lm_b, alpha, width, height):
     lm_a = lm_a.astype(np.float32)
     lm_b = lm_b.astype(np.float32)
     mean_lm = (1.0 - alpha) * lm_a + alpha * lm_b
+
+    # contour correction: keep the morphed jawline from drifting too far from both
+    # source faces (avoids a deformed "average" outline that matches neither).
+    mean_lm = clamp_contour(mean_lm, lm_a, lm_b)
 
     # border anchors keep the warp defined over the full frame
     pa = add_boundary_points(lm_a, width, height)

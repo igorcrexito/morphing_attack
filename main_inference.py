@@ -9,17 +9,17 @@ import matplotlib.gridspec as gridspec
 from sklearn.decomposition import PCA
 
 from landmarks.landmark import Landmarks
-from morphing.warp import morph_pair, poisson_seam_blend, frontalize
+from morphing.warp import morph_pair, poisson_seam_blend, warp_to_landmarks
 from morphing.dataset import landmarks_to_heatmaps
 from model.diffusion_model import DiffusionModel
 from image_utils.face_restore import restore_face
 
 tf.get_logger().setLevel("ERROR")
 
-# --- edit these defaults, or pass two paths on the command line ---------------
+# --- explicitly choose the two faces to morph (or pass two paths on the CLI) --
 DEFAULT_DIR = "output_dataset/1000"
-DEFAULT_A = "image_14.jpg"
-DEFAULT_B = "image_15.jpg"
+DEFAULT_A = "image_8.jpg"
+DEFAULT_B = "image_3668.jpg"
 
 # Facial zones defined by 68-landmark indices
 LANDMARK_ZONES = {
@@ -33,6 +33,8 @@ LANDMARK_ZONES = {
 }
 
 ZONE_PATCH_SIZE = 32  # each crop is resized to this before flattening
+
+# The blended face is always warped back to face A's posture.
 
 
 def _load_image(path, width, height):
@@ -197,7 +199,7 @@ if __name__ == "__main__":
     alpha = float(params["morphing_parameters"]["alpha"])
     cache_dir = str(params["dataset_parameters"]["cache_dir"])
 
-    # resolve the two input paths
+    # explicitly choose the two faces (CLI: path_a path_b, else the defaults)
     if len(sys.argv) >= 3:
         path_a, path_b = sys.argv[1], sys.argv[2]
     else:
@@ -216,16 +218,9 @@ if __name__ == "__main__":
     img_a = _load_image(path_a, width, height)
     img_b = _load_image(path_b, width, height)
 
-    # frontalization: warp each face to an upright, front-facing pose before
-    # morphing, so two differently-posed faces no longer deform when aligned to a
-    # common mean shape. Kept separate from img_a/img_b so the plots still show the
-    # original faces - only the morph uses the frontalized versions.
-    front_a, front_lm_a = frontalize(img_a, lm_a, width, height)
-    front_b, front_lm_b = frontalize(img_b, lm_b, width, height)
-
     # align both faces to the mean shape, build network inputs
     warped_a, warped_b, mean_lm, mask = morph_pair(
-        front_a, front_b, front_lm_a, front_lm_b, alpha, width, height)
+        img_a, img_b, lm_a, lm_b, alpha, width, height)
     heatmaps = landmarks_to_heatmaps(mean_lm, width, height)
 
     # add batch dimension
@@ -251,6 +246,10 @@ if __name__ == "__main__":
     # gradient-domain seam removal: re-integrate the morphed face over the
     # single-identity background so the hull boundary is invisible.
     blended = poisson_seam_blend(blended, warped_a, mean_lm, width, height)
+
+    # always pose the blend to face A: warp from the averaged mean shape onto A's
+    # own landmarks so the morph adopts A's posture.
+    blended = warp_to_landmarks(blended, mean_lm, lm_a, width, height)
 
     # final realism pass: GFPGAN re-synthesizes photographic facial detail
     # (skin/eyes/hair) that the upscale + L2 losses leave soft. No-op if GFPGAN
