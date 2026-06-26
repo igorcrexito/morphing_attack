@@ -16,3 +16,4 @@ gfpgan/weights/
 
 # Generated morph outputs
 output_dataset/
+morphed_dataset/

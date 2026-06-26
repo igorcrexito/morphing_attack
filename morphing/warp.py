@@ -150,6 +150,60 @@ def poisson_seam_blend(morph, background, landmarks_68, width, height):
     return blended.astype(np.float32) / 255.0
 
 
+# 68-landmark (ibug/dlib) left<->right correspondences. Points not listed lie on
+# the facial midline (chin, nose bridge, nose tip, mouth centre) and are their own
+# mirror.
+_SYMMETRY_PAIRS = [
+    (0, 16), (1, 15), (2, 14), (3, 13), (4, 12), (5, 11), (6, 10), (7, 9),  # jaw
+    (17, 26), (18, 25), (19, 24), (20, 23), (21, 22),                       # brows
+    (31, 35), (32, 34),                                                     # nose base
+    (36, 45), (37, 44), (38, 43), (39, 42), (40, 47), (41, 46),             # eyes
+    (48, 54), (49, 53), (50, 52), (59, 55), (58, 56),                       # outer mouth
+    (60, 64), (61, 63), (67, 65),                                           # inner mouth
+]
+
+
+def symmetrize_landmarks(landmarks_68: np.ndarray) -> np.ndarray:
+    """Return an upright, left-right symmetric ("frontal") version of a shape.
+
+    Mirroring the 68 landmarks about the face's own vertical midline and averaging
+    each point with its mirrored partner removes left/right asymmetry (yaw) and head
+    tilt (roll) at once: the only shape invariant under a vertical-axis reflection is
+    a front-facing, upright one. Identity-bearing proportions (face length/width,
+    feature spacing) are preserved.
+    """
+    lm = landmarks_68[:68].astype(np.float32)
+    cx = lm[:, 0].mean()
+
+    mirror = lm.copy()
+    mirror[:, 0] = 2.0 * cx - lm[:, 0]      # reflect across the vertical midline
+
+    # reorder so a point lands on top of the partner it should be symmetric with
+    reordered = mirror.copy()
+    for l, r in _SYMMETRY_PAIRS:
+        reordered[l], reordered[r] = mirror[r], mirror[l]
+
+    return (lm + reordered) * 0.5
+
+
+def frontalize(img, landmarks_68, width, height):
+    """Warp a face to a front-facing, upright pose via its symmetrized landmarks.
+
+    Returns (frontal_img, frontal_landmarks). This corrects in-plane tilt and mild
+    out-of-plane yaw using only the existing piecewise-affine warp; it cannot
+    recover detail occluded in a strong profile, which will smear.
+    """
+    lm = landmarks_68[:68].astype(np.float32)
+    target = symmetrize_landmarks(lm)
+
+    p_src = add_boundary_points(lm, width, height)
+    p_dst = add_boundary_points(target, width, height)
+    triangles = calculate_delaunay_triangles(width, height, p_dst)
+
+    out = warp_to_shape(img, p_src, p_dst, triangles, width, height)
+    return out, target
+
+
 def morph_pair(img_a, img_b, lm_a, lm_b, alpha, width, height):
     """Align A and B onto the mean shape and return the pieces the model needs.
 
