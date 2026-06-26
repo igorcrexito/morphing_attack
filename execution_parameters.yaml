@@ -19,13 +19,13 @@ morphing_parameters:
 
 model_parameters:
   train_morph_model: true
-  morph_epochs: 60
-  batch_size: 8
+  morph_epochs: 150
+  batch_size: 4
 
 dataset_parameters:
   output_dir: 'output_dataset/1000'   # where landmarked images/csvs live
   cache_dir: 'cache'                   # where warped-pair .npz files are written
   val_split: 0.15                      # fraction of identities held out
-  max_pairs: 450                      # cap on train pairs (null = all combinations)
-  max_val_pairs: 100
+  max_pairs: 2500                      # cap on train pairs (null = all combinations)
+  max_val_pairs: 300
   seed: 42

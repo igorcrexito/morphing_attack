@@ -18,8 +18,8 @@ tf.get_logger().setLevel("ERROR")
 
 # --- edit these defaults, or pass two paths on the command line ---------------
 DEFAULT_DIR = "output_dataset/1000"
-DEFAULT_A = "image_2.jpg"
-DEFAULT_B = "image_100.jpg"
+DEFAULT_A = "image_1.jpg"
+DEFAULT_B = "image_8.jpg"
 
 # Facial zones defined by 68-landmark indices
 LANDMARK_ZONES = {
