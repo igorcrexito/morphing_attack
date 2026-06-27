@@ -25,6 +25,7 @@ from morphing.dataset import landmarks_to_heatmaps
 from model.diffusion_model import DiffusionModel
 from image_utils.face_restore import restore_face
 from image_utils.face_embedding import embed_paths
+from landmarks.landmark import Landmarks
 
 tf.get_logger().setLevel("ERROR")
 
@@ -34,10 +35,10 @@ INPUT_ROOT = "output_dataset"
 OUTPUT_ROOT = "morphed_dataset"
 
 # Partner selection: for each face A, pick its most identity-similar face (FaceNet
-# cosine) that is also shape-compatible (shape_distance <= SHAPE_THRESHOLD). Each
+# cosine) that is also shape-compatible (shape_distance <= shape_threshold). Each
 # unordered pair is morphed once (no 4->5 and 5->4). The blended face is always
-# warped back to face A's posture.
-SHAPE_THRESHOLD = 0.12
+# warped back to face A's posture. shape_threshold (and the frontality/feather/
+# erode knobs) are read from execution_parameters.yaml -> quality_parameters.
 
 
 def _image_number(path):
@@ -72,7 +73,7 @@ def _load_landmarks(jpg_path, width, height):
 VALID_STRATEGIES = ("most_similar", "most_distant", "median")
 
 
-def _select_partner(i, embeddings, landmarks, used_pairs, strategy):
+def _select_partner(i, embeddings, landmarks, used_pairs, strategy, shape_threshold):
     """Pick a shape-compatible partner for image i by embedding-distance strategy.
 
     Candidates are every other face that is shape-compatible (shape_distance <=
@@ -92,7 +93,7 @@ def _select_partner(i, embeddings, landmarks, used_pairs, strategy):
             continue
         if frozenset((i, j)) in used_pairs:
             continue
-        if shape_distance(landmarks[i], landmarks[j]) <= SHAPE_THRESHOLD:
+        if shape_distance(landmarks[i], landmarks[j]) <= shape_threshold:
             candidates.append(j)
     if not candidates:
         return None
@@ -122,6 +123,14 @@ def main():
     cache_dir = str(params["dataset_parameters"]["cache_dir"])
     dataset_name = str(params["dataset_parameters"]["dataset_name"])
 
+    # blend-error mitigations (no retraining needed): see quality_parameters.
+    quality = params.get("quality_parameters", {}) or {}
+    shape_threshold = float(quality.get("shape_threshold", 0.12))
+    max_yaw = quality.get("max_yaw", None)
+    max_yaw = None if max_yaw is None else float(max_yaw)
+    feather = int(quality.get("hull_feather", 11))
+    erode_iters = int(quality.get("poisson_erode", 1))
+
     # per-dataset input/output: read landmarked images from output_dataset/<name>,
     # write morphs into morphed_dataset/<name>/<strategy>.
     input_dir = os.path.join(INPUT_ROOT, dataset_name)
@@ -133,9 +142,23 @@ def main():
     jpgs = sorted(glob.glob(os.path.join(input_dir, "*.jpg")), key=_image_number)
     jpgs = [p for p in jpgs if os.path.exists(os.path.splitext(p)[0] + ".csv")]
 
-    # precompute landmarks and FaceNet identity embeddings for every image so each
-    # face can be paired with its most look-alike (and shape-compatible) partner.
+    # precompute landmarks for every image so each face can be paired with its most
+    # look-alike (and shape-compatible) partner.
     landmarks = [_load_landmarks(p, width, height) for p in jpgs]
+
+    # frontality gate: drop non-frontal faces before pairing so they never feed a
+    # ghost-prone morph (the case behind visible blend seams).
+    if max_yaw is not None:
+        kept = [(p, lm) for p, lm in zip(jpgs, landmarks)
+                if Landmarks.frontality(lm) <= max_yaw]
+        dropped = len(jpgs) - len(kept)
+        if dropped:
+            print(f"Frontality gate: dropped {dropped}/{len(jpgs)} non-frontal "
+                  f"faces (max_yaw={max_yaw}).")
+        jpgs = [p for p, _ in kept]
+        landmarks = [lm for _, lm in kept]
+
+    # FaceNet identity embeddings for the surviving faces.
     embeddings = embed_paths(jpgs, width)
 
     # load the trained model once.
@@ -155,7 +178,8 @@ def main():
         try:
             # partner = the shape-compatible face chosen by the embedding-distance
             # strategy, skipping any pair already morphed in the other direction.
-            pick = _select_partner(i, embeddings, landmarks, used_pairs, strategy)
+            pick = _select_partner(i, embeddings, landmarks, used_pairs, strategy,
+                                   shape_threshold)
             if pick is None:
                 skipped += 1
                 tqdm.write(f"[skip] {os.path.basename(path_a)}: no new "
@@ -170,7 +194,7 @@ def main():
             img_b = _load_image(path_b, width, height)
 
             warped_a, warped_b, mean_lm, mask = morph_pair(
-                img_a, img_b, lm_a, lm_b, alpha, width, height)
+                img_a, img_b, lm_a, lm_b, alpha, width, height, feather=feather)
             heatmaps = landmarks_to_heatmaps(mean_lm, width, height)
 
             morph, _ = model.predict(
@@ -180,7 +204,8 @@ def main():
                 mask[None].astype(np.float32),
                 alpha=alpha)
             blended = np.clip(morph[0].numpy(), 0.0, 1.0)
-            blended = poisson_seam_blend(blended, warped_a, mean_lm, width, height)
+            blended = poisson_seam_blend(blended, warped_a, mean_lm, width, height,
+                                         erode_iters=erode_iters)
 
             # always pose the blend to face A: warp from the averaged mean shape
             # onto A's own landmarks so the morph adopts A's posture.

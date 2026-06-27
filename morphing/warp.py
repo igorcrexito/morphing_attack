@@ -131,7 +131,7 @@ def match_color(src, ref, mask):
     return cv2.cvtColor(s, cv2.COLOR_LAB2RGB).astype(np.float32) / 255.0
 
 
-def poisson_seam_blend(morph, background, landmarks_68, width, height):
+def poisson_seam_blend(morph, background, landmarks_68, width, height, erode_iters=1):
     """Gradient-domain (Poisson) composite of the morphed face onto `background`.
 
     The feathered alpha composite used in the model leaves a faint hull-boundary
@@ -144,8 +144,10 @@ def poisson_seam_blend(morph, background, landmarks_68, width, height):
     hull = cv2.convexHull(np.int32(landmarks_68[:68]))
     mask = np.zeros((height, width), dtype=np.uint8)
     cv2.fillConvexPoly(mask, hull, 255)
-    # erode slightly so seamlessClone has clean background gradients to anchor to
-    mask = cv2.erode(mask, np.ones((3, 3), np.uint8), iterations=1)
+    # erode so seamlessClone has clean background gradients to anchor to; more
+    # iterations pull the clone boundary further inside the face, hiding residual
+    # ghosting that sits right against the hull edge.
+    mask = cv2.erode(mask, np.ones((3, 3), np.uint8), iterations=erode_iters)
     # seamlessClone requires the masked region to sit strictly inside the frame;
     # clear a 1px border so a face that fills the frame can't push the ROI out.
     mask[0, :] = mask[-1, :] = mask[:, 0] = mask[:, -1] = 0
@@ -209,7 +211,7 @@ def clamp_contour(mean_lm, lm_a, lm_b, max_shift=CONTOUR_MAX_SHIFT):
     return out
 
 
-def morph_pair(img_a, img_b, lm_a, lm_b, alpha, width, height):
+def morph_pair(img_a, img_b, lm_a, lm_b, alpha, width, height, feather=11):
     """Align A and B onto the mean shape and return the pieces the model needs.
 
     Returns
@@ -236,7 +238,7 @@ def morph_pair(img_a, img_b, lm_a, lm_b, alpha, width, height):
     warped_a = warp_to_shape(img_a, pa, pm, triangles, width, height)
     warped_b = warp_to_shape(img_b, pb, pm, triangles, width, height)
 
-    mask = hull_mask(mean_lm, width, height)
+    mask = hull_mask(mean_lm, width, height, feather=feather)
 
     # photometric harmonization: align B's tone to A inside the face so the
     # cross-dissolve doesn't bake in a skin-tone/contrast seam.

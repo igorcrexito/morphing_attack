@@ -27,7 +27,7 @@ from model.diffusion_model import DiffusionModel
 from image_utils.face_restore import restore_face
 
 # reuse the analysis + plotting helpers so the output matches main_inference.py.
-from main_inference import (LANDMARK_ZONES, _load_image, _zone_embeddings,
+from main_inference import (LANDMARK_ZONES, _zone_embeddings,
                             _cosine_similarity, plot_morphing_results,
                             plot_zone_crops, plot_zone_embeddings)
 
@@ -54,6 +54,14 @@ def main():
     alpha = float(params["morphing_parameters"]["alpha"])
     cache_dir = str(params["dataset_parameters"]["cache_dir"])
 
+    # blend-error mitigations (no retraining needed): see quality_parameters.
+    quality = params.get("quality_parameters", {}) or {}
+    max_yaw = quality.get("max_yaw", None)
+    max_yaw = None if max_yaw is None else float(max_yaw)
+    feather = int(quality.get("hull_feather", 11))
+    erode_iters = int(quality.get("poisson_erode", 1))
+    align_faces = bool(quality.get("align_faces", False))
+
     # explicitly choose the two faces (CLI: path_a path_b, else the first two
     # images found in user_test/).
     if len(sys.argv) >= 3:
@@ -66,22 +74,24 @@ def main():
         path_a, path_b = imgs[0], imgs[1]
     print(f"User test images\nA: {path_a}\nB: {path_b}")
 
-    # --- landmark computation: detect 68 landmarks on the raw images, scaled to
-    # the model input resolution (this is the step main_inference.py relies on the
-    # cached .csv files for).
-    landmark_descriptor = Landmarks(number_of_landmarks=68)
+    # --- landmark computation: detect 68 landmarks on the raw images (this is the
+    # step main_inference.py relies on the cached .csv files for). generate_landmarks
+    # also returns the model-resolution colour image (aligned+cropped when
+    # align_faces is on, else a plain resize), keeping pixels and landmarks in sync.
+    landmark_descriptor = Landmarks(number_of_landmarks=68, max_yaw=max_yaw,
+                                    align=align_faces)
     raw_a = np.array(Image.open(path_a).convert("RGB"))
     raw_b = np.array(Image.open(path_b).convert("RGB"))
-    _, lm_a = landmark_descriptor.generate_landmarks(raw_a, 3, width, height)
-    _, lm_b = landmark_descriptor.generate_landmarks(raw_b, 3, width, height)
+    out_a, lm_a = landmark_descriptor.generate_landmarks(raw_a, 3, width, height)
+    out_b, lm_b = landmark_descriptor.generate_landmarks(raw_b, 3, width, height)
 
     # color images at model resolution (for warping + display)
-    img_a = _load_image(path_a, width, height)
-    img_b = _load_image(path_b, width, height)
+    img_a = np.asarray(out_a).astype(np.float32) / 255.0
+    img_b = np.asarray(out_b).astype(np.float32) / 255.0
 
     # align both faces to the mean shape, build network inputs
     warped_a, warped_b, mean_lm, mask = morph_pair(
-        img_a, img_b, lm_a, lm_b, alpha, width, height)
+        img_a, img_b, lm_a, lm_b, alpha, width, height, feather=feather)
     heatmaps = landmarks_to_heatmaps(mean_lm, width, height)
 
     # add batch dimension
@@ -106,7 +116,8 @@ def main():
 
     # gradient-domain seam removal: re-integrate the morphed face over the
     # single-identity background so the hull boundary is invisible.
-    blended = poisson_seam_blend(blended, warped_a, mean_lm, width, height)
+    blended = poisson_seam_blend(blended, warped_a, mean_lm, width, height,
+                                 erode_iters=erode_iters)
 
     # always pose the blend to face A: warp from the averaged mean shape onto A's
     # own landmarks so the morph adopts A's posture.

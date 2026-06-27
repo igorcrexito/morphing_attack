@@ -235,6 +235,12 @@ python user_test_images.py user_test/alice.jpg user_test/bob.jpg   # or pick exp
 It prints the per-zone cosine-similarity table and shows the same three plots
 (morphing result, zone crops, zone-embedding PCA + similarity heatmap).
 
+> **Use frontal face photos.** Landmark detection relies on dlib's *frontal*-face
+> detector, and the warping assumes a reliable front-facing 68-point
+> correspondence. Near-frontal, unobstructed, well-lit portraits (one face per
+> image) give the best morphs; strongly rotated, tilted, profile or occluded faces
+> may fail detection or produce poor results.
+
 ---
 
 ## Why hybrid (classical geometry + neural photometry)?
@@ -305,6 +311,41 @@ Because the weights are versioned alongside the code, you can reproduce results
 immediately after cloning; only re-run stages 1–3 if you want to **retrain** on a
 different dataset. GFPGAN's restoration weights are the one exception — they are
 downloaded automatically to `gfpgan/weights/` on the first inference run.
+
+## Reducing blend errors (ghosting / visible seams)
+
+Occasional morphs show a doubled feature (e.g. two eyebrows) or a faint
+rectangular hull seam. The cause is almost always a **non-frontal or pose-mismatched
+pair**: when A and B don't share a near-frontal pose the 68-point correspondence is
+unreliable, so after warping the features land a few pixels apart and ghost. The
+`quality_parameters` block in `execution_parameters.yaml` controls the mitigations —
+**none of these require retraining**, as they only affect pair selection, frontality
+filtering and the classical compositing around the network:
+
+| Key | Effect |
+|-----|--------|
+| `shape_threshold` | Max Procrustes shape divergence for a blendable pair (lower = stricter pairing; `0.09` is a good start, vs. the old loose `0.12`). |
+| `max_yaw` | Rejects non-frontal faces by nose/eye horizontal asymmetry (`0` = perfectly frontal). `null` disables the gate. Applied in `Landmarks` and as a pre-pairing filter in `main_generate_morphed_dataset.py`. |
+| `hull_feather` | Face-mask feather radius (px). Larger softens the hull boundary so residual ghosting fades instead of stepping. |
+| `poisson_erode` | Erosion iterations before `cv2.seamlessClone`; more pulls the clone boundary inside the face, hiding ghosting that sits against the hull edge. |
+| `align_faces` | Similarity-align & crop each face at landmark time (eyes → a canonical template) so faces are centered/scaled consistently and in-plane roll is removed. Improves facial detail and FaceNet identity/pairing. **See the retraining note below.** |
+
+**About `align_faces`.** When on, `Landmarks.generate_landmarks` rotates/scales/
+translates each face so its eye centers hit fixed template coordinates, then crops to
+the model resolution — the standard FFHQ/ArcFace-style alignment. It returns that
+aligned colour image, and every entry-point uses it (so the saved `.jpg` and its
+`.csv` always match). This puts more pixels on the face and gives FaceNet cleaner,
+consistently-scaled crops, which sharpens morphs and improves partner selection. It
+removes in-plane *roll* but **cannot** fix out-of-plane head rotation (yaw/pitch) —
+that's still the job of `max_yaw`. Because it changes the facial scale/position the
+network sees, **enabling it for the dataset flow means re-running
+`main_save_landmarks.py` and retraining (`main_train_model.py`)**; inference on the
+existing weights still runs but with a mild train/inference mismatch until you
+retrain. It's `false` by default for exactly this reason.
+
+The `median` / `most_distant` strategies are more exposed to ghosting (they pick
+less-similar — and often pose-mismatched — partners), so pair them with a tighter
+`shape_threshold`.
 
 ## Quick start (full pipeline)
 

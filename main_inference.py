@@ -201,6 +201,14 @@ if __name__ == "__main__":
     cache_dir = str(params["dataset_parameters"]["cache_dir"])
     dataset_name = str(params["dataset_parameters"]["dataset_name"])
 
+    # blend-error mitigations (no retraining needed): see quality_parameters.
+    quality = params.get("quality_parameters", {}) or {}
+    max_yaw = quality.get("max_yaw", None)
+    max_yaw = None if max_yaw is None else float(max_yaw)
+    feather = int(quality.get("hull_feather", 11))
+    erode_iters = int(quality.get("poisson_erode", 1))
+    align_faces = bool(quality.get("align_faces", False))
+
     # the dataset to morph faces from: output_dataset/<dataset_name>
     default_dir = os.path.join(DEFAULT_DIR_ROOT, dataset_name)
 
@@ -212,20 +220,22 @@ if __name__ == "__main__":
         path_b = os.path.join(default_dir, DEFAULT_B)
     print(f"Dataset '{dataset_name}'\nA: {path_a}\nB: {path_b}")
 
-    # detect landmarks on the (original-resolution) images, scaled to model input
-    landmark_descriptor = Landmarks(number_of_landmarks=68)
+    # detect landmarks (and get the model-resolution colour image: aligned+cropped
+    # when align_faces is on, else a plain resize) so pixels and landmarks match.
+    landmark_descriptor = Landmarks(number_of_landmarks=68, max_yaw=max_yaw,
+                                    align=align_faces)
     raw_a = np.array(Image.open(path_a).convert("RGB"))
     raw_b = np.array(Image.open(path_b).convert("RGB"))
-    _, lm_a = landmark_descriptor.generate_landmarks(raw_a, 3, width, height)
-    _, lm_b = landmark_descriptor.generate_landmarks(raw_b, 3, width, height)
+    out_a, lm_a = landmark_descriptor.generate_landmarks(raw_a, 3, width, height)
+    out_b, lm_b = landmark_descriptor.generate_landmarks(raw_b, 3, width, height)
 
     # color images at model resolution (for warping + display)
-    img_a = _load_image(path_a, width, height)
-    img_b = _load_image(path_b, width, height)
+    img_a = np.asarray(out_a).astype(np.float32) / 255.0
+    img_b = np.asarray(out_b).astype(np.float32) / 255.0
 
     # align both faces to the mean shape, build network inputs
     warped_a, warped_b, mean_lm, mask = morph_pair(
-        img_a, img_b, lm_a, lm_b, alpha, width, height)
+        img_a, img_b, lm_a, lm_b, alpha, width, height, feather=feather)
     heatmaps = landmarks_to_heatmaps(mean_lm, width, height)
 
     # add batch dimension
@@ -250,7 +260,8 @@ if __name__ == "__main__":
 
     # gradient-domain seam removal: re-integrate the morphed face over the
     # single-identity background so the hull boundary is invisible.
-    blended = poisson_seam_blend(blended, warped_a, mean_lm, width, height)
+    blended = poisson_seam_blend(blended, warped_a, mean_lm, width, height,
+                                 erode_iters=erode_iters)
 
     # always pose the blend to face A: warp from the averaged mean shape onto A's
     # own landmarks so the morph adopts A's posture.

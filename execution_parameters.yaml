@@ -18,6 +18,24 @@ morphing_parameters:
   alpha: 0.5
   morph_strategy: 'most_distant'
 
+quality_parameters:
+  # Mitigations for blend errors (ghosting / visible hull seams). None of these
+  # require retraining the model - they only affect pair selection, frontality
+  # filtering and the classical compositing around the network.
+  shape_threshold: 0.09      # max pose/shape divergence for a blendable pair
+                             # (Procrustes shape_distance; lower = stricter). 0.12 was loose.
+  max_yaw: 0.18              # reject non-frontal faces: max nose/eye horizontal
+                             # asymmetry (0 = perfectly frontal). null disables the gate.
+  hull_feather: 15           # face-mask feather radius in px (bigger = softer seam)
+  poisson_erode: 2           # erosion iters before seamlessClone (more = cleaner boundary)
+  align_faces: false         # similarity-align & crop each face (eyes -> canonical
+                             # template) at landmark time: centers/scales the face
+                             # consistently (better detail + identity) and removes
+                             # in-plane roll. ENABLING THIS CHANGES THE TRAINING-DATA
+                             # DISTRIBUTION: re-run main_save_landmarks AND retrain
+                             # (main_train_model) for the dataset flow. Inference on
+                             # existing weights still works but with a mild mismatch.
+
 model_parameters:
   train_morph_model: true
   morph_epochs: 70

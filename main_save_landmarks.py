@@ -56,22 +56,25 @@ if __name__ == "__main__":
     val_ids = set(identities[:n_val])
     print(f"Identities -> train: {len(identities) - n_val}, val: {n_val}")
 
+    quality = params.get("quality_parameters", {}) or {}
     landmark_descriptor = Landmarks(
-        number_of_landmarks=int(params["landmark_parameters"]["number_of_landmarks"]))
+        number_of_landmarks=int(params["landmark_parameters"]["number_of_landmarks"]),
+        align=bool(quality.get("align_faces", False)))
 
     counts = {"train": 0, "val": 0}
     for path, image in tqdm(items, desc="Landmarking", unit="img"):
         split = "val" if _identity_of(path) in val_ids else "train"
         out_dir = val_dir if split == "val" else train_dir
         try:
-            _, landmarks = landmark_descriptor.generate_landmarks(
+            out_image, landmarks = landmark_descriptor.generate_landmarks(
                 image=image, channels=channels, width=width, height=height)
 
             counts[split] += 1
             idx = counts[split]
 
-            resized = Image.fromarray(image).resize((width, height))
-            resized.save(os.path.join(out_dir, f"image_{idx}.jpg"), format="JPEG")
+            # save the image returned by generate_landmarks (aligned+cropped when
+            # align_faces is on) so the saved jpg matches its landmark .csv exactly.
+            out_image.save(os.path.join(out_dir, f"image_{idx}.jpg"), format="JPEG")
             np.savetxt(os.path.join(out_dir, f"image_{idx}.csv"),
                        landmarks, delimiter=",", header="x,y", comments="",
                        fmt="%.4f")
