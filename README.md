@@ -127,6 +127,57 @@ U-Net **residual refiner**.
 
 **Output:** `cache/morph_model.weights.h5`.
 
+#### Is this a GAN? How the generator and discriminator work
+
+**Yes — but a *conditional, partial* GAN, not a from-scratch image generator.**
+The adversarial loss is only one of five terms in the training objective, and the
+generator never synthesizes a whole face; it predicts a small correction on top of
+an already-aligned classical blend. Concretely:
+
+- **Generator** = the U-Net residual refiner (`build_morph_generator`). It takes
+  the 75-channel conditioning input (`warped_A` + `warped_B` + 68 landmark
+  heatmaps + hull mask) and outputs a `tanh`-bounded **residual delta** the same
+  size as the image. That delta is added to the classical blend *only inside the
+  feathered hull* (`_build_morph`):
+
+  ```
+  blended = (1 − α)·warped_A + α·warped_B     # geometry already solved → no ghosting
+  base    = mask·blended + (1 − mask)·warped_A # outside the hull = identity A
+  morph   = clip( base + delta·mask )          # generator refines inside the hull
+  ```
+
+  So this is a **conditional GAN** (cGAN): the generator is conditioned on the two
+  source faces and the landmark structure, not sampling from noise. Its job is
+  texture/photometry, not geometry.
+
+- **Discriminator** = a **PatchGAN** critic (`build_discriminator`). Instead of
+  emitting one real/fake score for the whole image, it is fully convolutional and
+  outputs a *grid* of logits, each judging a local ~receptive-field patch as
+  "real face" vs. "morph". This is what rewards locally realistic skin, eye and
+  hair texture — the high-frequency detail the pixel-L2 losses blur away. It is
+  hull-masked (`discriminator(x * mask)`) so it only critiques the face region.
+
+- **Adversarial game (`train_step`), trained with the LSGAN least-squares loss:**
+  1. *Discriminator step* — the **two aligned source photos** `warped_A`,
+     `warped_B` are the "real" examples (target → 1); the generator's `morph` is
+     the "fake" (target → 0). Crucially **no paired ground-truth morph is ever
+     needed** — the real distribution is simply "a genuine aligned face".
+  2. *Generator step* — the generator is pushed to make the critic score its
+     `morph` as real (`(d_fake − 1)²`), *in addition to* the reconstruction,
+     perceptual, identity-balance and TV terms. The adversarial weight
+     (`ADV_WEIGHT = 1`) is kept modest so the identity-balance loss (×25) still
+     dominates — the GAN sharpens texture but does not get to drift the morph
+     toward one identity.
+
+  The two networks have separate Adam optimizers and are updated alternately each
+  batch. Training diagnostics print `|Δ|` (mean absolute delta → shows the refiner
+  is actually correcting, not collapsing to zero), `adv` and `D` (the two sides of
+  the game staying in tension).
+
+In short: **classical warping does the geometry, a small conditional PatchGAN does
+the photometry**, and the adversarial term is a texture-sharpener layered on top of
+strong reconstruction/identity supervision — not the sole training signal.
+
 ### 4. Inference + analysis — `main_inference.py`
 
 Generates the final morph for a pair of images and quantifies the identity blend.
@@ -146,6 +197,43 @@ Generates the final morph for a pair of images and quantifies the identity blend
    cosine similarity of the morph to A and to B is reported per zone, plus a PCA
    projection and similarity heatmap. This verifies the morph genuinely sits
    between the two identities rather than collapsing onto one.
+
+### 5. Batch dataset generation — `main_generate_morphed_dataset.py`
+
+Generates a whole morphed dataset (rather than a single pair) from a landmarked
+dataset under `output_dataset/<dataset_name>`. For every face it picks a partner by
+**FaceNet embedding distance**, runs the full pipeline (align → refiner → Poisson
+seam blend → pose to A → GFPGAN), and writes only the final image.
+
+- **Partner-selection strategy** (`morph_strategy` in
+  `execution_parameters.yaml`) — among all shape-compatible candidates
+  (`shape_distance ≤ SHAPE_THRESHOLD`), rank by FaceNet cosine similarity and pick:
+  - `most_similar` — the closest identity (most realistic, hardest-to-detect morphs),
+  - `most_distant` — the farthest identity (hardest morphs to make convincing),
+  - `median` — the 50th-percentile candidate.
+- **Output layout** — morphs are written to
+  `morphed_dataset/<dataset_name>/<strategy>/morph_<a>_<b>.jpg`, so the three
+  strategies land in their own sub-directories side by side and can be compared.
+
+```bash
+python main_generate_morphed_dataset.py    # uses dataset_name + morph_strategy from the yaml
+```
+
+### 6. Morphing your own images — `user_test_images.py`
+
+Runs the same inference + analysis as `main_inference.py`, but **starting from raw
+images** (it performs landmark detection itself, so no pre-computed `.csv` is
+needed). Drop at least two face images into a `user_test/` folder:
+
+```bash
+mkdir -p user_test
+# copy two face photos into user_test/, then:
+python user_test_images.py                       # morphs the first two images found
+python user_test_images.py user_test/alice.jpg user_test/bob.jpg   # or pick explicitly
+```
+
+It prints the per-zone cosine-similarity table and shows the same three plots
+(morphing result, zone crops, zone-embedding PCA + similarity heatmap).
 
 ---
 
@@ -167,6 +255,8 @@ identities.
 | `main_prepare_pairs.py`  | Stage 2 — pair identities, warp & cache |
 | `main_train_model.py`    | Stage 3 — train the U-Net residual refiner |
 | `main_inference.py`      | Stage 4 — generate a morph + zone analysis |
+| `main_generate_morphed_dataset.py` | Stage 5 — batch-morph a whole dataset by embedding-distance strategy |
+| `user_test_images.py`    | Stage 6 — morph your own raw images from `user_test/` |
 | `landmarks/`             | dlib landmark detection & heatmaps |
 | `morphing/`              | warping (`warp.py`), pairing, dataset/caching |
 | `model/`                 | U-Net refiner + PatchGAN, ArcFace/FaceNet embedders |
@@ -179,6 +269,42 @@ Key knobs: `image_width/height` (model resolution, divisible by 8),
 `number_of_landmarks` (68), `alpha` (blend ratio; 0.5 = equal contribution),
 `morph_epochs` / `batch_size`, and the dataset parameters (`output_dir`,
 `cache_dir`, `val_split`, `max_pairs`, `seed`).
+
+## Getting the code (and the pre-trained weights)
+
+The repository is **self-contained**: the trained morph refiner
+(`cache/morph_model.weights.h5`, ≈8 MB) and the dlib landmark predictors
+(`landmarks/shape_predictor_68_face_landmarks.dat`,
+`landmarks/shape_predictor_5_face_landmarks.dat`) are committed directly to git, so
+a plain clone gives you everything needed to run inference — **no separate model
+download and no Git LFS required.**
+
+```bash
+# 1. clone
+git clone git@github.com:igorcrexito/morphing_attack.git
+#   (or over HTTPS:)
+# git clone https://github.com/igorcrexito/morphing_attack.git
+cd morphing_attack
+
+# 2. confirm the trained weights came down with the checkout
+ls -lh cache/morph_model.weights.h5            # ≈8 MB, ships in the repo
+
+# 3. create an environment and install the inference deps
+python -m venv .venv
+source .venv/bin/activate                      # Windows: .venv\Scripts\activate
+pip install -r requirements_inference.txt
+
+# 4. morph two of your own faces straight away — no training needed
+mkdir -p user_test                             # add two face photos here
+python user_test_images.py
+#   or morph an explicit pair:
+# python main_inference.py path/to/A.jpg path/to/B.jpg
+```
+
+Because the weights are versioned alongside the code, you can reproduce results
+immediately after cloning; only re-run stages 1–3 if you want to **retrain** on a
+different dataset. GFPGAN's restoration weights are the one exception — they are
+downloaded automatically to `gfpgan/weights/` on the first inference run.
 
 ## Quick start (full pipeline)
 
@@ -214,7 +340,8 @@ Notes:
 
 - **Image paths** are positional: the first argument is identity A, the second is
   identity B. If you omit them, it falls back to the defaults in
-  `main_inference.py` (`output_dataset/1000/image_1.jpg` and `image_8.jpg`).
+  `main_inference.py` (`output_dataset/<dataset_name>/image_1.jpg` and
+  `image_43.jpg`).
 - The blend ratio, model resolution, and `cache_dir` are read from
   `execution_parameters.yaml` (`alpha`, `image_width/height`, `cache_dir`).
 - On the **first** run GFPGAN downloads its model weights automatically to

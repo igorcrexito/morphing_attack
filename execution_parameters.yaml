@@ -6,7 +6,7 @@ image_parameters:
   image_width: 224
   image_height: 224
   image_channels: 3
-  dataset_path: '/home/igor/PycharmProjects/morphing_dataset'
+  dataset_path: '/home/igor/datasets/FRLL'   # source face images (FRLL frontal)
 
 landmark_parameters:
   number_of_landmarks: 68
@@ -16,16 +16,22 @@ plotting_parameters:
 
 morphing_parameters:
   alpha: 0.5
+  morph_strategy: 'most_distant'
 
 model_parameters:
   train_morph_model: true
-  morph_epochs: 150
-  batch_size: 4
+  morph_epochs: 70
+  batch_size: 8
 
 dataset_parameters:
-  output_dir: 'output_dataset/1000'   # where landmarked images/csvs live
+  dataset_name: 'cfd'              # which landmarked dataset the morph scripts
+                                       # consume: landmarked images are read from
+                                       # output_dataset/<dataset_name>, and
+                                       # main_generate writes to morphed_dataset/<dataset_name>
+  train_dir: 'output_dataset/train'    # landmarked training images/csvs
+  val_dir: 'output_dataset/val'        # landmarked validation images/csvs
   cache_dir: 'cache'                   # where warped-pair .npz files are written
-  val_split: 0.15                      # fraction of identities held out
-  max_pairs: 2500                      # cap on train pairs (null = all combinations)
-  max_val_pairs: 300
+  val_split: 0.15                      # fraction of identities held out for val
+  max_pairs: 174                      # cap on train pairs (null = all combinations)
+  max_val_pairs: 30
   seed: 42

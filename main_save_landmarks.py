@@ -1,93 +1,82 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-import tensorflow as tf
-from tensorflow import keras, einsum
-from tensorflow.keras import Model, Sequential
-from tensorflow.keras.layers import Layer
-import tensorflow_addons as tfa
-import tensorflow_datasets as tfds
-from einops import rearrange
-from einops.layers.tensorflow import Rearrange
+"""Detect landmarks on the source faces and split them into train/val.
+
+Loads the images under ``image_parameters.dataset_path`` (the FRLL frontal set),
+splits them into a training and a validation set *by identity* (so the same person
+never appears in both - FRLL stores several images per person, e.g. 172_03.jpg), and
+for each image writes a 224x224 copy plus its 68-point landmark .csv into the train
+or val output directory.
+"""
+import os
+import random
 import yaml
+import numpy as np
+import tensorflow as tf
+from tqdm import tqdm
+from PIL import Image
+
 from image_utils.image_loader import ImageLoader
 from landmarks.landmark import Landmarks
-from PIL import ImageDraw
-from PIL import Image
-import os
 
-output_dir = "output_dataset/1000"
-os.makedirs(output_dir, exist_ok=True)
-
-
-# Suppressing tf.hub warnings
 tf.get_logger().setLevel("ERROR")
 
-# configure the GPU
-gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8)
-config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
-session = tf.compat.v1.Session(config=config)
+
+def _identity_of(path):
+    """FRLL identity = filename prefix before the first underscore (172_03 -> 172)."""
+    return os.path.splitext(os.path.basename(str(path)))[0].split("_")[0]
 
 
-if __name__ == '__main__':
-
-    print("Reading the configuration yaml the stores the executation variables")
+if __name__ == "__main__":
     with open("execution_parameters.yaml", "r") as f:
         params = yaml.full_load(f)
 
-    ### instantiating and loading the image dataset
-    image_loader = ImageLoader(channels = int(params['image_parameters']['image_channels']),
-                                base_path = str(params['image_parameters']['dataset_path']))
+    channels = int(params["image_parameters"]["image_channels"])
+    width = int(params["image_parameters"]["image_width"])
+    height = int(params["image_parameters"]["image_height"])
+    dataset_path = str(params["image_parameters"]["dataset_path"])
 
-    image_dataset = image_loader.load_images_from_path()
+    dp = params["dataset_parameters"]
+    train_dir = str(dp["train_dir"])
+    val_dir = str(dp["val_dir"])
+    val_split = float(dp["val_split"])
+    seed = int(dp["seed"])
 
-    ### computing landmarks
-    landmark_descriptor = Landmarks(number_of_landmarks=int(params['landmark_parameters']['number_of_landmarks']))
+    os.makedirs(train_dir, exist_ok=True)
+    os.makedirs(val_dir, exist_ok=True)
 
+    ### load source images (keeping paths so we can split by identity)
+    image_loader = ImageLoader(channels=channels, base_path=dataset_path)
+    items = image_loader.load_images_with_paths()
+    print(f"Loaded {len(items)} images from {dataset_path}")
 
-    landmarks_list = []
-    image_list = []
-    for index, image in enumerate(image_dataset):
+    ### leakage-free split: hold out whole identities for validation
+    identities = sorted({_identity_of(p) for p, _ in items})
+    rng = random.Random(seed)
+    rng.shuffle(identities)
+    n_val = max(1, int(round(len(identities) * val_split)))
+    val_ids = set(identities[:n_val])
+    print(f"Identities -> train: {len(identities) - n_val}, val: {n_val}")
 
+    landmark_descriptor = Landmarks(
+        number_of_landmarks=int(params["landmark_parameters"]["number_of_landmarks"]))
+
+    counts = {"train": 0, "val": 0}
+    for path, image in tqdm(items, desc="Landmarking", unit="img"):
+        split = "val" if _identity_of(path) in val_ids else "train"
+        out_dir = val_dir if split == "val" else train_dir
         try:
-            _, landmarks = landmark_descriptor.generate_landmarks(image=image,
-                                                               channels=int(params['image_parameters']['image_channels']),
-                                                               width=int(params['image_parameters']['image_width']),
-                                                               height=int(params['image_parameters']['image_height']))
+            _, landmarks = landmark_descriptor.generate_landmarks(
+                image=image, channels=channels, width=width, height=height)
 
-            ### resizing image to be in accordance with model input
-            resized_image = Image.fromarray(image).resize((int(params['image_parameters']['image_width']),
-                                                           int(params['image_parameters']['image_height'])))
+            counts[split] += 1
+            idx = counts[split]
 
-            ### storing resized image
-            image_filename = os.path.join(output_dir, f"image_{index + 1}.jpg")
-            resized_image.save(image_filename, format="JPEG")
-
-            ### storing landmarks
-            landmark_filename = os.path.join(output_dir, f"image_{index + 1}.csv")
-            np.savetxt(landmark_filename,
-                       landmarks,
-                       delimiter=",",
-                       header="x,y",
-                       comments="",
+            resized = Image.fromarray(image).resize((width, height))
+            resized.save(os.path.join(out_dir, f"image_{idx}.jpg"), format="JPEG")
+            np.savetxt(os.path.join(out_dir, f"image_{idx}.csv"),
+                       landmarks, delimiter=",", header="x,y", comments="",
                        fmt="%.4f")
+        except Exception:                              # noqa: BLE001 - no face etc.
+            print(f"no face detected for {os.path.basename(str(path))}")
 
-
-            ### showing landmarks
-            if str(params['plotting_parameters']['plot_image']) == 'true':
-                image = np.array(Image.open(f"{output_dir}/image_{index + 1}.jpg"))
-
-                landmarks = np.loadtxt(f"{output_dir}/image_{index + 1}.csv", delimiter=",", skiprows=1)
-
-                plt.figure(figsize=(6, 6))
-                plt.imshow(image)
-
-                plt.scatter(landmarks[:, 0], landmarks[:, 1], color="red", s=20)
-
-                plt.xlim(0, 224)
-                plt.ylim(224, 0)
-
-                plt.axis("off")
-                plt.show()
-        except:
-            print(f'no face detected for index {index}')
+    print(f"Done. Saved train: {counts['train']} -> {train_dir}, "
+          f"val: {counts['val']} -> {val_dir}")

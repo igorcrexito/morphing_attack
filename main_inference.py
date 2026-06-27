@@ -17,9 +17,10 @@ from image_utils.face_restore import restore_face
 tf.get_logger().setLevel("ERROR")
 
 # --- explicitly choose the two faces to morph (or pass two paths on the CLI) --
-DEFAULT_DIR = "output_dataset/1000"
-DEFAULT_A = "image_8.jpg"
-DEFAULT_B = "image_3668.jpg"
+# DEFAULT_DIR resolves to output_dataset/<dataset_name> (see execution_parameters).
+DEFAULT_DIR_ROOT = "output_dataset"
+DEFAULT_A = "image_1.jpg"
+DEFAULT_B = "image_43.jpg"
 
 # Facial zones defined by 68-landmark indices
 LANDMARK_ZONES = {
@@ -198,14 +199,18 @@ if __name__ == "__main__":
     height = int(params["image_parameters"]["image_height"])
     alpha = float(params["morphing_parameters"]["alpha"])
     cache_dir = str(params["dataset_parameters"]["cache_dir"])
+    dataset_name = str(params["dataset_parameters"]["dataset_name"])
+
+    # the dataset to morph faces from: output_dataset/<dataset_name>
+    default_dir = os.path.join(DEFAULT_DIR_ROOT, dataset_name)
 
     # explicitly choose the two faces (CLI: path_a path_b, else the defaults)
     if len(sys.argv) >= 3:
         path_a, path_b = sys.argv[1], sys.argv[2]
     else:
-        path_a = os.path.join(DEFAULT_DIR, DEFAULT_A)
-        path_b = os.path.join(DEFAULT_DIR, DEFAULT_B)
-    print(f"A: {path_a}\nB: {path_b}")
+        path_a = os.path.join(default_dir, DEFAULT_A)
+        path_b = os.path.join(default_dir, DEFAULT_B)
+    print(f"Dataset '{dataset_name}'\nA: {path_a}\nB: {path_b}")
 
     # detect landmarks on the (original-resolution) images, scaled to model input
     landmark_descriptor = Landmarks(number_of_landmarks=68)
