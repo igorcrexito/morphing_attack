@@ -243,6 +243,60 @@ It prints the per-zone cosine-similarity table and shows the same three plots
 
 ---
 
+### 7. Benchmark mode — SYN-MAD 2022 / DCMorph-comparable evaluation
+
+The pairing in step 5 is a *quality* heuristic (look-alike partners), not an
+evaluation protocol. To produce numbers that line up with the published morphing
+tables (SYN-MAD 2022, DCMorph CVPRW 2026, MIPGAN, MorDIFF), use the benchmark path
+instead. It fixes the three things that otherwise make results incomparable:
+a protocol-defined pair list, uncorrelated probe images, and FMR-calibrated
+decision thresholds.
+
+```bash
+# 1. Landmark FRLL keeping subject identity (neutral -> parents, smiling -> probes)
+python main_prepare_frll.py
+
+# 2. Rank pairs with a margin-loss FR model (closer to the paper's ElasticFace-Arc
+#    than FaceNet). Run in the face_morph_verification venv, then copy the npz here.
+#    (Optional: skip and let step 3 rank with FaceNet.)
+python ../face_morph_verification/export_embeddings.py \
+    --images output_dataset/frll output_dataset/frll_probe \
+    --model adaface_ir101_wf12m --out cache/frll_adaface.npz
+
+# 3. Build the SYN-MAD pair list: gender x expression splits, 250 most-similar
+#    pairs per split -> 1000 morph pairs
+python main_syn_mad_pairs.py --embeddings cache/frll_adaface.npz
+
+# 4. Generate every pair in the list (shape/frontality gates deliberately off:
+#    the list defines the benchmark, so dropping pairs would change it)
+python main_generate_morphed_dataset.py --pairs pairs_synmad.csv
+
+# 5. Evaluate (in face_morph_verification)
+python calibrate_thresholds.py        # LFW thresholds at FMR 1% and 0.1%
+python morph_verify_protocol.py       # MMPMR100 / MMPMR1000 / RMMR
+```
+
+**Identity preservation.** `main_prepare_frll.py` replaces the identity-destroying
+renaming in `main_save_landmarks.py`: it names each file `image_<subject_id>.jpg`
+and writes an `index.csv` (id, gender, expression, source). Two consequences:
+`morph_<a>_<b>.jpg` now names the two contributing *subjects*, and
+`_select_partner` can refuse to pair a subject with another capture of themselves.
+Without that index (the `cfd`/`utrecht` datasets), a dataset holding several photos
+per person will happily morph someone with their own second photo under the
+`most_similar` strategy - which is not an attack at all.
+
+**Layout produced by the benchmark path:**
+
+```
+output_dataset/frll/image_<id>.jpg + .csv + index.csv   # neutral, morph parents
+output_dataset/frll_probe/image_<id>.jpg + .csv         # smiling, held-out probes
+pairs_synmad.csv                                        # 1000 protocol pairs
+morphed_dataset/frll_synmad/<expression>/morph_<a>_<b>.jpg
+```
+
+---
+
+
 ## Why hybrid (classical geometry + neural photometry)?
 
 A pure cross-dissolve of two faces ghosts, because corresponding features sit at

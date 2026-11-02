@@ -1,0 +1,92 @@
+# Published numbers pulled from the literature review notes
+# (/home/igor/morphing_literature_summaries.pdf) for CONTEXT ONLY.
+#
+# IMPORTANT CAVEATS - read before quoting any of this in the paper:
+#   1. These are NOT re-measured by this evaluation suite; they are copied from
+#      secondary descriptions (a literature-review document built from survey
+#      papers), not verified against each method's original PDF by this repo.
+#   2. Protocols differ: benchmark dataset, FR backbone, and morph-pair
+#      selection are not always identical across rows even when the metric
+#      name matches. Only compare against a row whose "protocol" field matches
+#      what evaluation/02_vulnerability_eval.py actually ran (SYN-MAD 2022 on
+#      FRLL is the closest match in this repo).
+#   3. Treat every number here as "reported to be roughly this" - re-verify
+#      against the cited paper before publication.
+#
+# Use 07_build_report.py, which merges this file with your OWN measured
+# results side by side, always visually separated, never averaged together.
+
+metrics:
+  - method: "Landmark morphing (classical, Delaunay + alpha-blend)"
+    protocol: "various, pre-2020 baselines"
+    mmpmr: "commonly 80-100% at lenient FRS thresholds"
+    mad_eer_untrained_detector: "low - ghosting is a well-studied, easily learned signature"
+    note: "Strong identity preservation by construction; the literature-agreed weak point is visible ghosting/artifacts, not attack success."
+    source: "Scherhag et al. 2019 survey; Antonutti et al. 2026 TBIOM review (both summarized in morphing_literature_summaries.pdf)"
+
+  - method: "MIPGAN-I / MIPGAN-II (StyleGAN-based, identity-prior loss)"
+    protocol: "FRGC and similar, various FR systems"
+    mmpmr: "improves over plain StyleGAN morphing, but reported as NOT uniformly better than landmark morphs at deceiving FRS"
+    mad_eer_untrained_detector: "moderate; morphs recognizable by 'streaking' GAN artifacts (see DCMorph Fig. 2)"
+    note: "Identity fidelity capped by GAN-inversion reconstruction limits (W+ latent space can't represent an arbitrary real face exactly)."
+    source: "Zhang et al. 2021 MIPGAN; summarized in morphing_literature_summaries.pdf section 3"
+
+  - method: "MorDIFF (diffusion autoencoder)"
+    protocol: "ElasticFace, CurricularFace, MixFaceNet, PocketNet"
+    mmpmr: "reported to surpass MIPGAN-I and MIPGAN-II"
+    mad_eer_untrained_detector: "higher than GAN morphs - substantially fewer generative artifacts (DCMorph Fig. 2)"
+    note: "No identity-aware conditioning during denoising - later work (Greedy-DiM, DCMorph) exploits this gap."
+    source: "Damer et al. 2023 MorDIFF; summarized in morphing_literature_summaries.pdf section 3"
+
+  - method: "Greedy-DiM* (greedy noise-prediction optimization)"
+    protocol: "SYN-MAD 2022 protocol on FRLL, ArcFace / AdaFace / ElasticFace"
+    mmpmr: "reported up to 100% MMPMR on all three systems - treated as the current attack-success ceiling in this field"
+    mad_eer_untrained_detector: "not the paper's focus; an SE-ResNeXt101 detector reported unable to generalize to it without retraining"
+    note: "Runs optimization inside the sampling loop; much slower than a single forward pass (Fast-DiM targets this cost)."
+    source: "Blasingame & Liu 2024 Greedy-DiM; summarized in morphing_literature_summaries.pdf section 3"
+
+  - method: "DCMorph (dual-stream cross-attention diffusion, full pipeline)"
+    protocol: "SYN-MAD 2022 protocol on FRLL (same protocol evaluation/01-02 reproduce), AdaFace / ArcFace / ElasticFace / CurricularFace (all ResNet-100)"
+    mmpmr: "0.998-1.000 MMPMR100, 0.965-0.995 MMPMR1000 (best across the four FR systems); embedding interpolation alone already reaches 0.992-1.000/0.936-0.986"
+    mad_eer_untrained_detector: "zero-shot foundation-model detector (MADPromptS) achieves only moderate performance on the full pipeline; ablated single-stream variants are individually easier to catch"
+    note: "Directly comparable protocol to this repo's evaluation/02_vulnerability_eval.py - the closest published reference point for your own SYN-MAD numbers."
+    source: "Chettaoui et al. 2026 DCMorph; summarized in morphing_literature_summaries.pdf section 3 (full methodology read)"
+
+  - method: "ReGenMorph (landmark morph re-synthesized by StyleGAN)"
+    protocol: "FRGC"
+    mmpmr: "reported slightly LESS successful at deceiving FRS than either plain landmark morphs or MIPGAN-II"
+    mad_eer_untrained_detector: "markedly more effective against MAD detectors not trained on ReGenMorph specifically"
+    note: "GAN re-synthesis is a lossy round trip through a bounded latent space - discards some artifacts AND some identity/geometry fidelity from the first stage."
+    source: "Damer et al. 2021 ReGenMorph; summarized in morphing_literature_summaries.pdf section 4"
+
+  - method: "MorphUNet (alpha-controlled diffusion-based morphing)"
+    protocol: "FRLL, but a custom 'six-FRS' protocol (ArcFace, VGG-Face, FaceNet, FaceNet512, MagFace, AdaFace) - NOT confirmed to be the SYN-MAD 2022 pairing"
+    mmpmr: "reported to achieve the highest AVERAGE MMPMR across the six matchers among compared methods, with 'particularly strong transfer to ArcFace, MagFace, and AdaFace' - exact per-matcher numbers not extracted from the paper text available to this repo"
+    mad_eer_untrained_detector: "not reported in the sections retrieved"
+    note: "Found via web search 2026-09-28, not yet independently verified against the full PDF - re-check before citing exact numbers. Same dataset (FRLL) as this repo, but a different, non-SYN-MAD pairing protocol, so not a strict apples-to-apples MMPMR comparison."
+    source: "MorphUNet, arXiv 2607.25092 (fetched via WebFetch, section extraction only)"
+
+  - method: "MorCode (generative-codebook morphing)"
+    protocol: "MorCode Morphing Dataset (MMD), built from FRGC V2 - NOT FRLL/SYN-MAD"
+    mmpmr: "reports Generalized Morphing Attack Potential (G-MAP), not MMPMR - not directly convertible to the MMPMR numbers in this table"
+    mad_eer_untrained_detector: "not reported in the sections retrieved"
+    note: "Different dataset AND different metric (G-MAP vs MMPMR) - listed here only as a related contemporaneous method, not a comparable data point. Do not average or compare its numbers against this table's MMPMR column."
+    source: "MorCode, arXiv 2410.07625 (fetched via WebFetch, section extraction only)"
+
+detectors:
+  - method: "Batskos, IWBF 2025 - JPEG compression-error statistical features + SVM"
+    protocol: "BOEP S-MAD benchmark"
+    eer: "~5% (top performance on BOEP at the time reported)"
+    note: "evaluation/common/mad_features.py is an independent, SIMPLIFIED re-implementation of this idea, not a reproduction - do not directly compare its EER to this row without re-verifying against the original paper."
+    source: "Batskos, IWBF 2025; summarized in morphing_literature_summaries.pdf section 5"
+
+  - method: "SelfMAD++ (Ivanovska et al., Information Fusion 2026)"
+    protocol: "trained purely on synthetically-injected artifacts, no real morphs seen during training"
+    eer: "not numerically summarized in the review notes; headline claim is strong cross-attack-type generalization"
+    note: "The hardest, most honest detectability test for a new morph generator: it never saw this attack type during training."
+    source: "Ivanovska et al. 2026 SelfMAD++; summarized in morphing_literature_summaries.pdf section 5"
+
+human_perception:
+  - description: "Untrained human observers accepting alpha=0.5 landmark morphs as genuine"
+    rate: "68%, dropping to 21% after a short training briefing"
+    source: "Robertson et al., cited via Scherhag et al. 2019 survey; summarized in morphing_literature_summaries.pdf section 1"
